@@ -1,6 +1,6 @@
-//@flow
-var str: number = "hi";
-console.log(str);
+// //@flow
+// var str:number = "hi";
+// console.log(str);
 
 let SCALE = 2
 var map
@@ -25,27 +25,39 @@ class Knight extends Phaser.Sprite {
         game.world.add(this)
         game.physics.arcade.enable(this)
 
-        this.body.setSize(24, 18, 4)
+        // create weapon
+        this.weapon = new Phaser.Sprite(game, 0, -16, null)
+        game.physics.arcade.enable(this.weapon)
+        this.weapon.body.immovable = true
+        this.weapon.body.setSize(22, 26, -5, 8)
+        this.weapon.body.enable = false
+        this.addChild(this.weapon)
+
+        this.resetHitbox()
         this.body.drag.setTo(0.8, 0.8)
 
         this.anchor.setTo(0.5, 0.5)
         this.animations.add("walk", getAnimationRow(0))
         this.animations.add("idle", getAnimationRow(1))
+
         let attack = this.animations.add("attack", getAnimationRow(2))
         attack.onComplete.add(sprite => {
-            sprite.attacking = false
+            sprite.weapon.attacking = false
             sprite.state = state.IDLE
             sprite.animations.play("idle", 3, true)
+            sprite.weapon.body.enable = false
+            sprite.resetHitbox()
         })
 
         let damage = this.animations.add("damage", getAnimationRow(3))
         damage.onComplete.add(sprite => {
             sprite.state = state.IDLE
             this.body.velocity.setTo(0, 0)
+            this.body.immovable = false
             this.animations.play("idle", 3, true)
         })
 
-        let dash = this.animations.add("dash", [23,23,23])
+        let dash = this.animations.add("dash", [23, 23, 23])
         dash.onComplete.add(sprite => {
             sprite.state = state.IDLE
             this.body.velocity.setTo(0, 0)
@@ -57,7 +69,11 @@ class Knight extends Phaser.Sprite {
         this.addChild(shadow)
 
         this.body.velocity = new Phaser.Point(0, 0)
-        this.speed = 1.5
+        this.speed = 1.1
+    }
+
+    resetHitbox() {
+        this.body.setSize(14, 9, 9, 22)
     }
 
     damage(angle, force) {
@@ -65,8 +81,15 @@ class Knight extends Phaser.Sprite {
         let x = Math.cos(angle) * force
         let y = Math.sin(angle) * force
         this.body.velocity.setTo(x, y)
-        if (x < 0) this.scale.x = 1
-        if (x > 0) this.scale.x = -1
+        this.body.immovable = true
+        if (x < 0) {
+            this.weapon.scale.x = 1
+            this.scale.x = 1
+        }
+        if (x > 0) {
+            this.weapon.scale.x = -1
+            this.scale.x = -1
+        }
         this.animations.play("damage", 15, false)
         this.state = state.DAMAGE
     }
@@ -87,7 +110,16 @@ class Knight extends Phaser.Sprite {
                 break;
             case state.ATTACKING:
                 this.animations.play("attack", 10, false)
+                this.weapon.body.enable = true
                 this.position.add(this.body.velocity.x * this.speed, this.body.velocity.y * this.speed)
+                if (this.position.x < game.input.activePointer.x) {
+                    this.weapon.scale.x = 1
+                    this.scale.x = 1
+                }
+                if (this.position.x > game.input.activePointer.x) {
+                    this.weapon.scale.x = -1
+                    this.scale.x = -1
+                }
                 break;
             case state.DAMAGE:
                 break;
@@ -115,10 +147,9 @@ class Player extends Knight {
         if (this.state === state.ATTACKING) return
         this.state = state.IDLE
 
-
         this.body.velocity.setTo(0, 0)
         if (this.keys.attack.isDown) {
-            this.attacking = true
+            this.weapon.attacking = true
             this.state = state.ATTACKING
             return
         }
@@ -128,7 +159,7 @@ class Player extends Knight {
             this.state = state.WALKING
         }
         if (this.keys.right.isDown) {
-            this.scale.x = 1
+            this.weapon.scale.x = 1
             this.body.velocity.x = this.speed
             this.state = state.WALKING
         }
@@ -137,7 +168,7 @@ class Player extends Knight {
             this.state = state.WALKING
         }
         if (this.keys.left.isDown) {
-            this.scale.x = -1
+            this.weapon.scale.x = -1
             this.body.velocity.x = -this.speed
             this.state = state.WALKING
         }
@@ -176,7 +207,7 @@ function preload() {
     //  tiles are 16x16 each
     game.load.image('tiles', 'examples/assets/tilemaps/tiles/sci-fi-tiles.png');
     game.load.image('shadow', 'images/shadow.png');
-    game.load.spritesheet('knight', 'images/knight.png', 32, 32, 4*8)
+    game.load.spritesheet('knight', 'images/knight.png', 32, 32, 4 * 8)
 }
 
 
@@ -208,30 +239,44 @@ function create() {
 }
 
 function collisionHandler(a, b) {
-    if (!a.attacking)return false
+    console.log("collision w")
+    if (!a.attacking) return false
+    let origin = a.parent
     let force = 120
-    let angle = game.physics.arcade.angleBetween(a, b) + game.rnd.realInRange(-1, 1)
-    console.log("hit")
+    // let angle = game.physics.arcade.angleBetween(a, b) + game.rnd.realInRange(-1, 1)
+    let angle = game.physics.arcade.angleToPointer(origin, game.input.activePointer)
+    a.attacking = false
     b.damage(angle, force)
     return false
+}
+function collideKnights(a,b){
+    return true
 }
 
 
 function createMap() {
     //  Create some map data dynamically
     let mapSize = 32
+    let roomSize = 12
+    let offset = (roomSize / 2)
     var data = ''
     let ct = 0
     let FLOOR_VARIATIONS = [18, 18, 18, 18, 18, 18, 19, 20]
 
     for (var y = 0; y < mapSize; y++) {
         for (var x = 0; x < mapSize; x++) {
-            data += game.rnd.pick(FLOOR_VARIATIONS) // game.rnd.between(18, 20).toString()
-            if (x < mapSize-1) {
+            if (x > offset && x < (mapSize - offset) && y > offset && y < (mapSize - offset)) {
+                data += game.rnd.pick(FLOOR_VARIATIONS) // game.rnd.between(18, 20).toString()
+            } else {
+                data += 1
+            }
+
+
+            if (x < mapSize - 1) {
                 data += ',';
             }
         }
-        if (y < mapSize-1) {
+        if (y < mapSize - 1) {
             data += "\n";
         }
     }
@@ -254,7 +299,9 @@ function createMap() {
 
 function update() {
     // setup collisions
-    if (game.physics.arcade.collide(this.player, this.npcGroup, collisionHandler, null, this)) {
+    if (game.physics.arcade.overlap(this.player.weapon, this.npcGroup, collisionHandler, null, this)) {
+    }
+    if (game.physics.arcade.collide(this.player, this.npcGroup, collideKnights, null, this)) {
     }
 
     if (cursors.left.isDown) {
@@ -275,6 +322,7 @@ function update() {
 }
 
 function debug() {
+    game.debug.body(this.player.weapon)
     game.debug.body(this.player)
     this.npcGroup.forEach(npc => game.debug.body(npc))
 }
