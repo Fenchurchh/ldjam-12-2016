@@ -1,9 +1,13 @@
-let SCALE = 3
+//@flow
+var str: number = "hi";
+console.log(str);
+
+let SCALE = 2
 var map
 var layer
 var cursors
 
-function animationRow(n) {
+function getAnimationRow(n) {
     return [n * 4, n * 4 + 1, n * 4 + 2, n * 4 + 3]
 }
 
@@ -11,7 +15,8 @@ const state = {
     WALKING: 0,
     ATTACKING: 1,
     DAMAGE: 2,
-    IDLE: 3
+    IDLE: 3,
+    DASHING: 4
 }
 
 class Knight extends Phaser.Sprite {
@@ -20,22 +25,31 @@ class Knight extends Phaser.Sprite {
         game.world.add(this)
         game.physics.arcade.enable(this)
 
-        this.body.setSize(24, 32, 4)
+        this.body.setSize(24, 18, 4)
         this.body.drag.setTo(0.8, 0.8)
 
         this.anchor.setTo(0.5, 0.5)
-        this.animations.add("walk", animationRow(0))
-        this.animations.add("idle", animationRow(1))
-        let attack = this.animations.add("attack", animationRow(2))
+        this.animations.add("walk", getAnimationRow(0))
+        this.animations.add("idle", getAnimationRow(1))
+        let attack = this.animations.add("attack", getAnimationRow(2))
         attack.onComplete.add(sprite => {
             sprite.attacking = false
             sprite.state = state.IDLE
             sprite.animations.play("idle", 3, true)
         })
-        let damage = this.animations.add("damage", animationRow(3))
+
+        let damage = this.animations.add("damage", getAnimationRow(3))
         damage.onComplete.add(sprite => {
             sprite.state = state.IDLE
             this.body.velocity.setTo(0, 0)
+            this.animations.play("idle", 3, true)
+        })
+
+        let dash = this.animations.add("dash", [23,23,23])
+        dash.onComplete.add(sprite => {
+            sprite.state = state.IDLE
+            this.body.velocity.setTo(0, 0)
+            this.animations.play("idle", 3, true)
         })
 
         let shadow = game.make.sprite(-1, 3, 'shadow')
@@ -47,7 +61,7 @@ class Knight extends Phaser.Sprite {
     }
 
     damage(angle, force) {
-        console.log("hit knight")
+        console.log(`hit knight at angle ${angle} with force ${force}`)
         let x = Math.cos(angle) * force
         let y = Math.sin(angle) * force
         this.body.velocity.setTo(x, y)
@@ -58,7 +72,6 @@ class Knight extends Phaser.Sprite {
     }
 
     update() {
-        this.body.velocity.normalize()
 
         switch (this.state) {
             case state.IDLE:
@@ -68,8 +81,13 @@ class Knight extends Phaser.Sprite {
                 this.animations.play("walk", 5, true)
                 this.position.add(this.body.velocity.x * this.speed, this.body.velocity.y * this.speed)
                 break;
+            case state.DASHING:
+                this.animations.play("dash", 10, false)
+                this.position.add(this.body.velocity.x * this.speed * 2, this.body.velocity.y * this.speed * 2)
+                break;
             case state.ATTACKING:
                 this.animations.play("attack", 10, false)
+                this.position.add(this.body.velocity.x * this.speed, this.body.velocity.y * this.speed)
                 break;
             case state.DAMAGE:
                 break;
@@ -80,21 +98,23 @@ class Knight extends Phaser.Sprite {
 class Player extends Knight {
     constructor(game, x = 200, y = 200) {
         super(game, x, y)
+        this.body.immovable = true
         this.keys = {}
         this.keys.up = game.input.keyboard.addKey(Phaser.KeyCode.W)
         this.keys.right = game.input.keyboard.addKey(Phaser.KeyCode.D)
         this.keys.down = game.input.keyboard.addKey(Phaser.KeyCode.S)
         this.keys.left = game.input.keyboard.addKey(Phaser.KeyCode.A)
         this.keys.attack = game.input.activePointer.leftButton
+        this.keys.dash = game.input.keyboard.addKey(Phaser.KeyCode.SPACEBAR)
     }
 
     update() {
         super.update()
-
+        if (this.state === state.DASHING) return
         this.body.velocity.setTo(0, 0)
-
-        if (this.state === state.ATTACKING)return
+        if (this.state === state.ATTACKING) return
         this.state = state.IDLE
+
 
         this.body.velocity.setTo(0, 0)
         if (this.keys.attack.isDown) {
@@ -127,6 +147,11 @@ class Player extends Knight {
             this.body.velocity.y *= (0.8)
         }
 
+        if (this.keys.dash.isDown) {
+            this.state = state.DASHING
+            return
+        }
+
     }
 }
 
@@ -151,7 +176,7 @@ function preload() {
     //  tiles are 16x16 each
     game.load.image('tiles', 'examples/assets/tilemaps/tiles/sci-fi-tiles.png');
     game.load.image('shadow', 'images/shadow.png');
-    game.load.spritesheet('knight', 'images/knight.png', 32, 32, 16)
+    game.load.spritesheet('knight', 'images/knight.png', 32, 32, 4*8)
 }
 
 
@@ -188,26 +213,25 @@ function collisionHandler(a, b) {
     let angle = game.physics.arcade.angleBetween(a, b) + game.rnd.realInRange(-1, 1)
     console.log("hit")
     b.damage(angle, force)
-    return true
+    return false
 }
 
 
 function createMap() {
     //  Create some map data dynamically
-    //  Map size is 128x128 tiles
+    let mapSize = 32
     var data = ''
     let ct = 0
+    let FLOOR_VARIATIONS = [18, 18, 18, 18, 18, 18, 19, 20]
 
-    for (var y = 0; y < 128; y++) {
-        for (var x = 0; x < 128; x++) {
-
-            data += game.rnd.pick([18, 18, 18, 18, 18, 18, 19, 20]) // game.rnd.between(18, 20).toString()
-            if (x < 127) {
+    for (var y = 0; y < mapSize; y++) {
+        for (var x = 0; x < mapSize; x++) {
+            data += game.rnd.pick(FLOOR_VARIATIONS) // game.rnd.between(18, 20).toString()
+            if (x < mapSize-1) {
                 data += ',';
             }
-
         }
-        if (y < 127) {
+        if (y < mapSize-1) {
             data += "\n";
         }
     }
@@ -256,10 +280,8 @@ function debug() {
 }
 
 function render() {
-    debug.call(this)
+    // debug.call(this)
 }
-
-
 
 
 var game = new Phaser.Game(window.innerWidth / SCALE, window.innerHeight / SCALE, Phaser.AUTO, 'phaser-example', {
